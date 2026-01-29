@@ -101,78 +101,14 @@ export default apiInitializer("1.0", (api) => {
       if (error.jqXHR?.status === 422) {
         log("Could not vote (already voted or voting not enabled):", topicId);
       } else {
-        console.error("[Auto Vote Own Topic] Error casting vote:", error);
+        log("Error casting vote:", error.jqXHR?.status || error);
       }
       return false;
     }
   };
 
-  // Method 1: Listen for topic:created event
-  api.onAppEvent("topic:created", (data) => {
-    log("topic:created event fired:", data);
-    log("topic:created data keys:", data ? Object.keys(data) : "null");
-
-    if (data?.id) {
-      const topicId = data.id;
-      // category_id might be in different places depending on Discourse version
-      let categoryId = data.category_id || data.categoryId || data.category?.id;
-
-      // If category_id not in event data, try to get it from composer
-      if (categoryId === undefined) {
-        const composer = api.container.lookup("service:composer");
-        if (composer?.model?.categoryId) {
-          categoryId = composer.model.categoryId;
-          log("Got category from composer:", categoryId);
-        }
-      }
-
-      log("New topic created:", { topicId, categoryId });
-
-      if (!isCategoryAllowed(categoryId)) {
-        log("Category not in allowed list:", categoryId);
-        return;
-      }
-
-      // Add a small delay to ensure the topic is fully created on the server
-      setTimeout(() => {
-        castVote(topicId, "topic:created");
-      }, 500);
-    }
-  });
-
-  // Method 2: Intercept AJAX to catch new topic creation
-  const originalAjax = $.ajax;
-  $.ajax = function (options) {
-    const result = originalAjax.apply(this, arguments);
-
-    // Only intercept if it returns a promise
-    if (result && result.then) {
-      result.then((response) => {
-        const url = options.url || "";
-
-        // Check if this is a topic creation POST
-        if (options.type === "POST" && url.includes("/posts")) {
-          // New topic = post_number 1
-          if (response?.post?.topic_id && response?.post?.post_number === 1) {
-            const topicId = response.post.topic_id;
-            const categoryId = response.post.category_id;
-
-            log("New topic detected from AJAX:", { topicId, categoryId });
-
-            if (isCategoryAllowed(categoryId)) {
-              setTimeout(() => {
-                castVote(topicId, "ajax:interceptor");
-              }, 100);
-            }
-          }
-        }
-      });
-    }
-
-    return result;
-  };
-
-  // Method 3: Fallback on page navigation
+  // Auto-vote on page navigation to own topic
+  // This reliably catches when the user is redirected to their newly created topic
   api.onPageChange((url) => {
     const topicMatch = url.match(/\/t\/[^/]+\/(\d+)/);
     if (!topicMatch) {
