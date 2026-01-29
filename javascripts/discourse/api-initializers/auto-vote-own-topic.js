@@ -1,4 +1,4 @@
-// Auto Vote Own Topic v1.4 - with direct DOM manipulation for instant UI
+// Auto Vote Own Topic v1.5 - vote on composer save before redirect
 import { apiInitializer } from "discourse/lib/api";
 import { ajax } from "discourse/lib/ajax";
 
@@ -52,6 +52,9 @@ export default apiInitializer("1.0", (api) => {
   };
 
   const autoVotedTopics = new Set();
+
+  // Track topics we've voted on before the page loads so we can update UI immediately
+  const preVotedTopics = new Set();
 
   const isCategoryAllowed = (categoryId) => {
     if (!settings.auto_vote_categories || settings.auto_vote_categories.length === 0) {
@@ -165,14 +168,69 @@ export default apiInitializer("1.0", (api) => {
     }
   };
 
-  // Auto-vote on page navigation to own topic
-  // This reliably catches when the user is redirected to their newly created topic
+  // Listen for composer create events to vote BEFORE the page redirects
+  api.modifyClass("model:composer", {
+    pluginId: "auto-vote-own-topic",
+
+    save(opts) {
+      const isNewTopic = this.creatingTopic;
+      const categoryId = this.categoryId;
+
+      // Call the original save method
+      const savePromise = this._super(opts);
+
+      // If creating a new topic in an allowed category, vote after save completes
+      if (isNewTopic && isCategoryAllowed(categoryId)) {
+        savePromise.then((result) => {
+          if (result && result.responseJson && result.responseJson.post) {
+            const topicId = result.responseJson.post.topic_id;
+            log("Topic created via composer, voting immediately:", topicId);
+
+            // Mark as pre-voted so onPageChange knows to update UI immediately
+            preVotedTopics.add(topicId);
+
+            // Cast the vote immediately (don't await - let the redirect happen)
+            ajax("/voting/vote", {
+              type: "POST",
+              data: { topic_id: topicId },
+            }).then((voteResponse) => {
+              log("Pre-vote successful for topic:", topicId, voteResponse);
+            }).catch((error) => {
+              log("Pre-vote failed:", error);
+              // Remove from pre-voted so onPageChange will try again
+              preVotedTopics.delete(topicId);
+            });
+          }
+        });
+      }
+
+      return savePromise;
+    }
+  });
+
+  // Auto-vote on page navigation to own topic (fallback + UI update)
   api.onPageChange((url) => {
     const topicMatch = url.match(/\/t\/[^/]+\/(\d+)/);
     if (!topicMatch) {
       return;
     }
 
+    const topicIdFromUrl = parseInt(topicMatch[1], 10);
+
+    // If we pre-voted this topic, just update the UI immediately
+    if (preVotedTopics.has(topicIdFromUrl)) {
+      log("Topic was pre-voted, updating UI immediately:", topicIdFromUrl);
+      preVotedTopics.delete(topicIdFromUrl);
+      autoVotedTopics.add(topicIdFromUrl);
+
+      // Small delay to ensure DOM is ready
+      setTimeout(() => {
+        updateVoteUI(1);
+      }, 50);
+      return;
+    }
+
+    // Fallback: check if we need to vote (for topics opened directly, not via composer)
     setTimeout(() => {
       const topicController = api.container.lookup("controller:topic");
       const topic = topicController?.model;
