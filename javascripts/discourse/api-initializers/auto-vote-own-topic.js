@@ -38,6 +38,14 @@ export default apiInitializer("1.0", (api) => {
   };
 
   const castVote = async (topicId) => {
+    // Prevent duplicate attempts
+    if (autoVotedTopics.has(topicId)) {
+      log("Already attempted auto-vote for topic:", topicId);
+      return false;
+    }
+
+    autoVotedTopics.add(topicId);
+
     try {
       log("Casting vote for topic:", topicId);
 
@@ -111,14 +119,11 @@ export default apiInitializer("1.0", (api) => {
       return;
     }
 
-    // Mark as attempted before making the call
-    autoVotedTopics.add(topicId);
-
     // Cast the vote
     castVote(topicId);
   };
 
-  // Method 1: Listen for page changes and check topic
+  // Method 1: Listen for page changes and check topic (fallback for page refresh)
   api.onPageChange((url) => {
     // Check if we're on a topic page
     const topicMatch = url.match(/\/t\/[^/]+\/(\d+)/);
@@ -137,16 +142,12 @@ export default apiInitializer("1.0", (api) => {
     }, 500);
   });
 
-  // Method 2: Listen for topic model changes via appEvents
-  api.onAppEvent("topic:created", (topic) => {
-    log("Topic created event received:", topic?.id);
-    if (topic) {
-      // Small delay to ensure all properties are populated
-      setTimeout(() => checkAndVote(topic), 500);
-    }
+  // Method 2: Listen for composer create event - fires immediately when topic is created
+  api.onAppEvent("composer:created-post", (data) => {
+    log("composer:created-post event received:", data);
   });
 
-  // Method 3: Hook into the composer after successful post
+  // Method 3: Hook into the composer - fire vote immediately on topic creation
   api.modifyClass("model:composer", {
     pluginId: "auto-vote-own-topic",
 
@@ -154,21 +155,26 @@ export default apiInitializer("1.0", (api) => {
       this._super(...arguments);
 
       // Check if this was a new topic creation (not a reply)
-      if (result?.responseJson?.post?.topic_id && this.creatingTopic) {
+      if (this.creatingTopic && result?.responseJson?.post?.topic_id) {
         const topicId = result.responseJson.post.topic_id;
-        log("New topic created via composer:", topicId);
+        const categoryId = this.categoryId;
 
-        // Fetch topic data and auto-vote after a delay
-        setTimeout(async () => {
-          try {
-            const topicData = await ajax(`/t/${topicId}.json`);
-            if (topicData) {
-              checkAndVote(topicData);
-            }
-          } catch (error) {
-            log("Error fetching new topic data:", error);
-          }
-        }, 1000);
+        log("New topic created via composer:", { topicId, categoryId });
+
+        if (!settings.auto_vote_enabled) {
+          log("Auto-vote is disabled");
+          return;
+        }
+
+        // Check category before voting
+        if (!isCategoryAllowed(categoryId)) {
+          log("Category not in allowed list:", categoryId);
+          return;
+        }
+
+        // Vote immediately - no need to fetch topic data
+        // We know the user created it, so just vote
+        castVote(topicId);
       }
     },
   });
