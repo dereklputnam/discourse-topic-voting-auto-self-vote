@@ -4,7 +4,6 @@ import { ajax } from "discourse/lib/ajax";
 export default apiInitializer("1.0", (api) => {
   const currentUser = api.getCurrentUser();
 
-  // Exit early if user is not logged in
   if (!currentUser) {
     return;
   }
@@ -17,7 +16,6 @@ export default apiInitializer("1.0", (api) => {
 
   log("Initializing auto-vote component for user:", currentUser.username);
 
-  // Track topics we've already attempted to auto-vote on this session
   const autoVotedTopics = new Set();
 
   const isCategoryAllowed = (categoryId) => {
@@ -70,8 +68,7 @@ export default apiInitializer("1.0", (api) => {
     }
   };
 
-  // Primary method: Listen for topic:created event
-  // This fires immediately when a new topic is created
+  // Method 1: Listen for topic:created event
   api.onAppEvent("topic:created", (data) => {
     log("topic:created event fired:", data);
 
@@ -90,7 +87,40 @@ export default apiInitializer("1.0", (api) => {
     }
   });
 
-  // Fallback: Check on page load/navigation for topics user created but hasn't voted on
+  // Method 2: Use jQuery ajaxComplete to listen for POST /posts responses
+  // This is safer than overriding $.ajax - it just listens, doesn't modify
+  $(document).on("ajaxComplete", (event, xhr, ajaxSettings) => {
+    // Only care about POST requests to /posts
+    if (ajaxSettings.type !== "POST" || !ajaxSettings.url?.includes("/posts")) {
+      return;
+    }
+
+    try {
+      const response = JSON.parse(xhr.responseText);
+
+      // Check if this is a new topic (post_number === 1)
+      if (response?.post?.topic_id && response?.post?.post_number === 1) {
+        const topicId = response.post.topic_id;
+        const categoryId = response.post.category_id;
+
+        log("New topic detected via ajaxComplete:", { topicId, categoryId });
+
+        if (!isCategoryAllowed(categoryId)) {
+          log("Category not in allowed list:", categoryId);
+          return;
+        }
+
+        // Small delay to ensure topic is fully ready
+        setTimeout(() => {
+          castVote(topicId, "ajaxComplete");
+        }, 200);
+      }
+    } catch (e) {
+      // Not JSON or parsing failed - ignore
+    }
+  });
+
+  // Method 3: Fallback on page navigation
   api.onPageChange((url) => {
     const topicMatch = url.match(/\/t\/[^/]+\/(\d+)/);
     if (!topicMatch) {
@@ -105,7 +135,6 @@ export default apiInitializer("1.0", (api) => {
         return;
       }
 
-      // Only vote if: user created it, can vote, hasn't voted yet
       if (
         topic.user_id === currentUser.id &&
         topic.can_vote &&
