@@ -1,3 +1,4 @@
+// Auto Vote Own Topic v1.1 - with page reload after voting
 import { apiInitializer } from "discourse/lib/api";
 import { ajax } from "discourse/lib/ajax";
 
@@ -31,14 +32,9 @@ export default apiInitializer("1.0", (api) => {
       return true;
     }
 
-    log("Category settings value:", settings.auto_vote_categories);
-    log("Parsed category settings:", categorySettings);
-    log("Checking category ID:", categoryId);
-
     // First try: direct numeric ID match
     const numericIds = categorySettings.map((id) => parseInt(id, 10)).filter((id) => !isNaN(id));
     if (numericIds.length > 0 && numericIds.includes(categoryId)) {
-      log("Category matched by numeric ID");
       return true;
     }
 
@@ -47,13 +43,10 @@ export default apiInitializer("1.0", (api) => {
     if (site && site.categories) {
       const category = site.categories.find((c) => c.id === categoryId);
       if (category) {
-        log("Found category:", { id: category.id, slug: category.slug, name: category.name });
-
         // Check if the category slug or name matches any setting
         const lowerSettings = categorySettings.map((s) => s.toLowerCase());
         if (lowerSettings.includes(category.slug?.toLowerCase()) ||
             lowerSettings.includes(category.name?.toLowerCase())) {
-          log("Category matched by slug/name");
           return true;
         }
 
@@ -63,14 +56,12 @@ export default apiInitializer("1.0", (api) => {
             ? `${category.parentCategory.slug}/${category.slug}`
             : category.slug;
           if (lowerSettings.includes(fullSlug.toLowerCase())) {
-            log("Category matched by full slug path");
             return true;
           }
         }
       }
     }
 
-    log("Category not matched:", categoryId);
     return false;
   };
 
@@ -90,12 +81,24 @@ export default apiInitializer("1.0", (api) => {
     try {
       log(`Casting vote for topic ${topicId} (source: ${source})`);
 
-      await ajax("/voting/vote", {
+      const response = await ajax("/voting/vote", {
         type: "POST",
         data: { topic_id: topicId },
       });
 
-      log("Vote cast successfully for topic:", topicId);
+      log("Vote cast successfully for topic:", topicId, response);
+
+      // Force a page reload to show the updated vote state
+      // Using location.replace to avoid adding to browser history
+      const currentUrl = window.location.href;
+      const separator = currentUrl.includes("?") ? "&" : "?";
+      const newUrl = currentUrl.includes("_voted=")
+        ? currentUrl
+        : `${currentUrl}${separator}_voted=1`;
+
+      log("Reloading page to show vote:", newUrl);
+      window.location.replace(newUrl);
+
       return true;
     } catch (error) {
       if (error.jqXHR?.status === 422) {
