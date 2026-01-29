@@ -1,4 +1,4 @@
-// Auto Vote Own Topic v1.1 - with page reload after voting
+// Auto Vote Own Topic v1.3 - with appEvents for smooth UI update
 import { apiInitializer } from "discourse/lib/api";
 import { ajax } from "discourse/lib/ajax";
 
@@ -88,16 +88,43 @@ export default apiInitializer("1.0", (api) => {
 
       log("Vote cast successfully for topic:", topicId, response);
 
-      // Force a page reload to show the updated vote state
-      // Using location.replace to avoid adding to browser history
-      const currentUrl = window.location.href;
-      const separator = currentUrl.includes("?") ? "&" : "?";
-      const newUrl = currentUrl.includes("_voted=")
-        ? currentUrl
-        : `${currentUrl}${separator}_voted=1`;
+      // Try multiple approaches to update the UI smoothly
+      try {
+        const topicController = api.container.lookup("controller:topic");
+        const topic = topicController?.model;
 
-      log("Reloading page to show vote:", newUrl);
-      window.location.replace(newUrl);
+        if (topic && topic.id === topicId) {
+          // Update local state immediately for instant feedback
+          topic.set("user_voted", true);
+          topic.set("vote_count", (topic.vote_count || 0) + 1);
+          log("Updated topic model properties");
+
+          // Try appEvents to notify the voting plugin
+          const appEvents = api.container.lookup("service:app-events");
+          if (appEvents) {
+            log("Triggering appEvents for vote update");
+            appEvents.trigger("topic:voted", { topicId, voted: true });
+            appEvents.trigger("topic-stats:update", { topicId });
+          }
+
+          // Give Ember a moment to process the property changes
+          setTimeout(() => {
+            // If the vote button still doesn't show as voted, try router refresh
+            const router = api.container.lookup("service:router");
+            if (router && router.refresh) {
+              log("Refreshing route to ensure vote UI is updated");
+              router.refresh();
+            }
+          }, 100);
+        } else {
+          // Fallback if topic model not found
+          log("Topic model not found, reloading page");
+          window.location.reload();
+        }
+      } catch (e) {
+        log("Error updating UI, reloading page:", e);
+        window.location.reload();
+      }
 
       return true;
     } catch (error) {
