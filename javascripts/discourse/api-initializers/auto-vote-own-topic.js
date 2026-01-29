@@ -18,21 +18,14 @@ export default apiInitializer("1.0", (api) => {
     }
   };
 
-  const isNewlyCreated = (createdAt) => {
-    const created = new Date(createdAt);
-    const now = new Date();
-    const diffSeconds = (now - created) / 1000;
-    return diffSeconds < settings.auto_vote_time_window_seconds;
-  };
-
   const isCategoryAllowed = (categoryId) => {
     // If no categories specified, allow all
-    if (!settings.auto_vote_category_ids || settings.auto_vote_category_ids.length === 0) {
+    if (!settings.auto_vote_categories || settings.auto_vote_categories.length === 0) {
       return true;
     }
 
     // Parse the pipe-separated list of category IDs
-    const allowedIds = settings.auto_vote_category_ids
+    const allowedIds = settings.auto_vote_categories
       .split("|")
       .map((id) => parseInt(id.trim(), 10))
       .filter((id) => !isNaN(id));
@@ -91,7 +84,6 @@ export default apiInitializer("1.0", (api) => {
       currentUserId: currentUser.id,
       canVote: topic.can_vote,
       userVoted: topic.user_voted,
-      createdAt: topic.created_at,
       categoryId: topic.category_id,
     });
 
@@ -110,12 +102,6 @@ export default apiInitializer("1.0", (api) => {
     // Check if user already voted
     if (topic.user_voted) {
       log("User has already voted on this topic");
-      return;
-    }
-
-    // Check if topic is newly created
-    if (!isNewlyCreated(topic.created_at)) {
-      log("Topic is not newly created (outside time window)");
       return;
     }
 
