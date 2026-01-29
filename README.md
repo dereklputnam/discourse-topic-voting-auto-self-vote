@@ -31,6 +31,29 @@ Rather than requiring users to manually click the vote button after creating a t
 3. Enter the repository URL
 4. Add the component to your active theme
 
+## Backfill Script
+
+A Ruby script is included to backfill votes for existing topics where authors haven't voted on their own topics.
+
+### Usage
+
+1. SSH into your Discourse server
+2. Enter the container: `cd /var/discourse && ./launcher enter app`
+3. Open Rails console: `rails c`
+4. Copy and paste the script from `scripts/backfill_self_votes.rb`
+
+### Configuration
+
+Edit these variables at the top of the script:
+
+```ruby
+DRY_RUN = true           # Set to false to create votes
+CATEGORY_IDS = []        # Limit to specific categories (empty = all)
+EXCLUDED_GROUP_IDS = []  # Exclude users in these groups
+```
+
+Run with `DRY_RUN = true` first to preview what will be changed.
+
 ## Requirements
 
 - Discourse 3.1.0 or higher
