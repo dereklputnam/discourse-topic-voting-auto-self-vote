@@ -15,4 +15,4 @@ auto_vote_on_visit:
   type: bool
   default: false
   description:
-    en: "Also auto-vote when users visit their own unvoted topics (not just on creation)"
+    en: "Retroactively auto-vote on a user's own older topics when they visit them"
