@@ -87,38 +87,37 @@ export default apiInitializer("1.0", (api) => {
     }
   });
 
-  // Method 2: Use jQuery ajaxComplete to listen for POST /posts responses
-  // This is safer than overriding $.ajax - it just listens, doesn't modify
-  $(document).on("ajaxComplete", (event, xhr, ajaxSettings) => {
-    // Only care about POST requests to /posts
-    if (ajaxSettings.type !== "POST" || !ajaxSettings.url?.includes("/posts")) {
-      return;
-    }
+  // Method 2: Intercept AJAX to catch new topic creation
+  const originalAjax = $.ajax;
+  $.ajax = function (options) {
+    const result = originalAjax.apply(this, arguments);
 
-    try {
-      const response = JSON.parse(xhr.responseText);
+    // Only intercept if it returns a promise
+    if (result && result.then) {
+      result.then((response) => {
+        const url = options.url || "";
 
-      // Check if this is a new topic (post_number === 1)
-      if (response?.post?.topic_id && response?.post?.post_number === 1) {
-        const topicId = response.post.topic_id;
-        const categoryId = response.post.category_id;
+        // Check if this is a topic creation POST
+        if (options.type === "POST" && url.includes("/posts")) {
+          // New topic = post_number 1
+          if (response?.post?.topic_id && response?.post?.post_number === 1) {
+            const topicId = response.post.topic_id;
+            const categoryId = response.post.category_id;
 
-        log("New topic detected via ajaxComplete:", { topicId, categoryId });
+            log("New topic detected from AJAX:", { topicId, categoryId });
 
-        if (!isCategoryAllowed(categoryId)) {
-          log("Category not in allowed list:", categoryId);
-          return;
+            if (isCategoryAllowed(categoryId)) {
+              setTimeout(() => {
+                castVote(topicId, "ajax:interceptor");
+              }, 100);
+            }
+          }
         }
-
-        // Small delay to ensure topic is fully ready
-        setTimeout(() => {
-          castVote(topicId, "ajaxComplete");
-        }, 200);
-      }
-    } catch (e) {
-      // Not JSON or parsing failed - ignore
+      });
     }
-  });
+
+    return result;
+  };
 
   // Method 3: Fallback on page navigation
   api.onPageChange((url) => {
