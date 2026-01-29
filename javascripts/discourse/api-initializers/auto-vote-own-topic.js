@@ -133,7 +133,10 @@ export default apiInitializer("1.0", (api) => {
         return;
       }
 
-      castVote(topicId, "topic:created");
+      // Add a small delay to ensure the topic is fully created on the server
+      setTimeout(() => {
+        castVote(topicId, "topic:created");
+      }, 500);
     }
   });
 
